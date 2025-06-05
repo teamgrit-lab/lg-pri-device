@@ -8,6 +8,11 @@ find_package(sensor_msgs REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system thread)
 find_package(PkgConfig REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+
+
 pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
 pkg_check_modules(GSTREAMER_APP REQUIRED gstreamer-app-1.0)
 
@@ -17,6 +22,9 @@ ament_target_dependencies(left_arm_node
   rclcpp
   geometry_msgs
   nlohmann_json
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
 )
 install(TARGETS left_arm_node
   DESTINATION lib/${PROJECT_NAME}
@@ -28,6 +36,9 @@ ament_target_dependencies(right_arm_node
   rclcpp
   geometry_msgs
   nlohmann_json
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
 )
 install(TARGETS right_arm_node
   DESTINATION lib/${PROJECT_NAME}
