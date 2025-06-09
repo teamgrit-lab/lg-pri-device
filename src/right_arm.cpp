@@ -13,10 +13,7 @@
 #include <thread>
 #include <deque>
 
-//////////////////////////////////////////////////////////////////////////////////////
-#include "cobiz_bridge/srv/cobiz_service_call.hpp"
-#include <cobiz_bridge/msg/cobiz_service_msgs.hpp>
-//////////////////////////////////////////////////////////////////////////////////////
+#include <lg_robot/srv/gripper_command.hpp>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -32,9 +29,10 @@ public:
         : Node("right_arm_node"), host_(host), port_(port), endpoint_(endpoint), mime_(mime), tf_buffer_(this->get_clock()), tf_listener_(tf_buffer_)
     {
         pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose", 10);
+        pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose_no_filter", 10);
 
 //////////////////////////////////////////////////////////////
-        client_ = this->create_client<cobiz_bridge::srv::CobizServiceCall>("/navigate_to_pose_service");
+        client_ = this->create_client<lg_robot::srv::GripperCommand>("/jodell/gripper_command/right");
         ///////////////////////////////////////
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&RightArmNode::lookup_tf_and_send, this));
         // Start the WebSocket connection
@@ -98,9 +96,9 @@ public:
     }
 
 
-    std::string call_service(const std::string &request_data) {
-        auto request = std::make_shared<cobiz_bridge::srv::CobizServiceCall::Request>();
-        request->data = request_data;
+    std::string call_service(const int request_data) {
+        auto request = std::make_shared<lg_robot::srv::GripperCommand::Request>();
+        request->command = request_data;
     
         // 서비스 호출
         // auto future = client_->send_request(request);
@@ -112,8 +110,9 @@ public:
             return "";
         } else {
             auto response = future.get();
-            RCLCPP_INFO(this->get_logger(), "서비스 호출 성공: %s, 응답: %s", "navigate_to_pose_service", response->response_data.c_str());
-            return response->response_data;
+            RCLCPP_INFO(this->get_logger(), "서비스 호출 성공: %s, 응답: %s", "navigate_to_pose_service", response->message.c_str());
+            gripper_state_ = response->result;
+            return response->message;
         }
     }
 
@@ -207,39 +206,13 @@ public:
             }
 
             pose_publisher_->publish(averaged_pose);
+            pose_publisher_no_filter->publish(*current_pose);
 
 
             ////////////////////////////////////////////
             try {
                 int gripper = j["gripper"].get<int>();
-                if (gripper == 1) {
-                    gripper_state_ = 1;
-                    json data;
-                    data["pose"]["position"]["x"] = 0.0;
-                    data["pose"]["position"]["y"] = 0.0;
-                    data["pose"]["position"]["z"] = 0.0;
-                    data["pose"]["orientation"]["x"] = 0.0;
-                    data["pose"]["orientation"]["y"] = 0.0;
-                    data["pose"]["orientation"]["z"] = 0.0;
-                    data["pose"]["orientation"]["w"] = 1.0;
-                    std::string request_data = data.dump();
-                    std::string response = call_service(request_data);
-                    RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
-                }
-                else if (gripper == 0) {
-                    gripper_state_ = 0;
-                    json data;
-                    data["pose"]["position"]["x"] = 1.0;
-                    data["pose"]["position"]["y"] = 0.0;
-                    data["pose"]["position"]["z"] = 0.0;
-                    data["pose"]["orientation"]["x"] = 0.0;
-                    data["pose"]["orientation"]["y"] = 0.0;
-                    data["pose"]["orientation"]["z"] = 0.0;
-                    data["pose"]["orientation"]["w"] = 1.0;
-                    std::string request_data = data.dump();
-                    std::string response = call_service(request_data);
-                    RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
-                }
+                std::string response = call_service(gripper);
             } catch (std::exception &e) {
                 RCLCPP_ERROR(this->get_logger(), "Error parsing gripper state from JSON: %s", e.what());
             }
@@ -323,11 +296,12 @@ public:
 
 private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_no_filter;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
     /////////////////////////////////////
-    rclcpp::Client<cobiz_bridge::srv::CobizServiceCall>::SharedPtr client_;
+    rclcpp::Client<lg_robot::srv::GripperCommand>::SharedPtr client_;
     ////////////////////////////
 
     net::io_context ioc_;
@@ -341,7 +315,7 @@ private:
     std::shared_ptr<net::steady_timer> write_timer_;
     beast::flat_buffer buffer_;
     bool trigger = false;
-    int gripper_state_ = 0; // 0: open, 1: close
+    bool gripper_state_ = false;
 
 
     std::deque<geometry_msgs::msg::PoseStamped::SharedPtr> pose_buffer_;
