@@ -13,6 +13,11 @@
 #include <thread>
 #include <deque>
 
+//////////////////////////////////////////////////////////////////////////////////////
+#include "cobiz_bridge/srv/cobiz_service_call.hpp"
+#include <cobiz_bridge/msg/cobiz_service_msgs.hpp>
+//////////////////////////////////////////////////////////////////////////////////////
+
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
@@ -28,6 +33,9 @@ public:
     {
         pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose", 10);
 
+//////////////////////////////////////////////////////////////
+        client_ = this->create_client<cobiz_bridge::srv::CobizServiceCall>("/navigate_to_pose_service");
+        ///////////////////////////////////////
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&RightArmNode::lookup_tf_and_send, this));
         // Start the WebSocket connection
         try {
@@ -89,6 +97,26 @@ public:
         }
     }
 
+
+    std::string call_service(const std::string &request_data) {
+        auto request = std::make_shared<cobiz_bridge::srv::CobizServiceCall::Request>();
+        request->data = request_data;
+    
+        // 서비스 호출
+        // auto future = client_->send_request(request);
+        auto future = client_->async_send_request(request);
+        // 응답 출력
+
+        if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), future) != rclcpp::FutureReturnCode::SUCCESS) {
+            RCLCPP_ERROR(this->get_logger(), "서비스 호출 실패: %s", "navigate_to_pose_service");
+            return "";
+        } else {
+            auto response = future.get();
+            RCLCPP_INFO(this->get_logger(), "서비스 호출 성공: %s, 응답: %s", "navigate_to_pose_service", response->response_data.c_str());
+            return response->response_data;
+        }
+    }
+
     void read()
     {
         read_timer_->expires_after(std::chrono::milliseconds(10));
@@ -129,8 +157,40 @@ public:
             current_pose->pose.orientation.z = std::stof(j["orientation"]["y"].get<std::string>());
             current_pose->pose.orientation.w = std::stof(j["orientation"]["w"].get<std::string>());
 
+            ////////////////////////////////////////////
+            int gripper = j["gripper"].get<int>();
+            if (gripper == 1) {
+                gripper_state_ = 1;
+                json data;
+                data["pose"]["position"]["x"] = 0.0;
+                data["pose"]["position"]["y"] = 0.0;
+                data["pose"]["position"]["z"] = 0.0;
+                data["pose"]["orientation"]["x"] = 0.0;
+                data["pose"]["orientation"]["y"] = 0.0;
+                data["pose"]["orientation"]["z"] = 0.0;
+                data["pose"]["orientation"]["w"] = 1.0;
+                std::string request_data = data.dump();
+                std::string response = call_service(request_data);
+                RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
+            }
+            else if (gripper == 0) {
+                gripper_state_ = 0;
+                json data;
+                data["pose"]["position"]["x"] = 1.0;
+                data["pose"]["position"]["y"] = 0.0;
+                data["pose"]["position"]["z"] = 0.0;
+                data["pose"]["orientation"]["x"] = 0.0;
+                data["pose"]["orientation"]["y"] = 0.0;
+                data["pose"]["orientation"]["z"] = 0.0;
+                data["pose"]["orientation"]["w"] = 1.0;
+                std::string request_data = data.dump();
+                std::string response = call_service(request_data);
+                RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
+            }
+            ////////////////////////////////////////////
+
             pose_buffer_.push_back(current_pose);
-            if (pose_buffer_.size() > 3) {
+            if (pose_buffer_.size() > 8) {
                 pose_buffer_.pop_front();
             }
 
@@ -145,19 +205,25 @@ public:
             double sum_qz = 0.0;
             double sum_qw = 0.0;
 
+            double sum_exp = 0.0;
+            int count = 0;
             for (const auto& pose_msg : pose_buffer_) {
-                sum_x += pose_msg->pose.position.x;
-                sum_y += pose_msg->pose.position.y;
-                sum_z += pose_msg->pose.position.z;
+                sum_exp += std::exp(count / 10.0);
+                sum_x += pose_msg->pose.position.x * std::exp(count / 10.0);
+                sum_y += pose_msg->pose.position.y * std::exp(count / 10.0);
+                sum_z += pose_msg->pose.position.z * std::exp(count / 10.0);
+
+                count++;
+
                 sum_qx += pose_msg->pose.orientation.x;
                 sum_qy += pose_msg->pose.orientation.y;
                 sum_qz += pose_msg->pose.orientation.z;
                 sum_qw += pose_msg->pose.orientation.w;
             }
 
-            averaged_pose.pose.position.x = sum_x / pose_buffer_.size();
-            averaged_pose.pose.position.y = sum_y / pose_buffer_.size();
-            averaged_pose.pose.position.z = sum_z / pose_buffer_.size();
+            averaged_pose.pose.position.x = sum_x / sum_exp;
+            averaged_pose.pose.position.y = sum_y / sum_exp;
+            averaged_pose.pose.position.z = sum_z / sum_exp;
 
             averaged_pose.pose.orientation.x = sum_qx / pose_buffer_.size();
             averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
@@ -173,18 +239,6 @@ public:
             }
 
             pose_publisher_->publish(averaged_pose);
-
-//            auto pose_msg = std::make_shared<geometry_msgs::msg::PoseStamped>();
-//            pose_msg->header.stamp = this->now();
-//            pose_msg->header.frame_id = "arm";
-//            pose_msg->pose.position.x = -std::stof(j["position"]["z"].get<std::string>());
-//            pose_msg->pose.position.y = -std::stof(j["position"]["x"].get<std::string>());
-//            pose_msg->pose.position.z = std::stof(j["position"]["y"].get<std::string>());
-//            pose_msg->pose.orientation.x = -std::stof(j["orientation"]["z"].get<std::string>());
-//            pose_msg->pose.orientation.y = -std::stof(j["orientation"]["x"].get<std::string>());
-//            pose_msg->pose.orientation.z = std::stof(j["orientation"]["y"].get<std::string>());
-//            pose_msg->pose.orientation.w = std::stof(j["orientation"]["w"].get<std::string>());
-//            pose_publisher_->publish(*pose_msg);
         }
         catch (json::parse_error &e) {
             RCLCPP_ERROR(this->get_logger(), "Error parsing JSON: %s", e.what());
@@ -209,6 +263,9 @@ public:
             j_tf_data["orientation"]["y"] = transform_stamped.transform.rotation.z;
             j_tf_data["orientation"]["z"] = -transform_stamped.transform.rotation.x;
             j_tf_data["orientation"]["w"] = transform_stamped.transform.rotation.w;
+            ///////////////////////
+            j_tf_data["gripper"] = gripper_state_;
+            /////////////////////////////
 
             std::string tf_json_str = j_tf_data.dump();
             if (!trigger){
@@ -266,6 +323,9 @@ private:
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
+    /////////////////////////////////////
+    rclcpp::Client<cobiz_bridge::srv::CobizServiceCall>::SharedPtr client_;
+    ////////////////////////////
 
     net::io_context ioc_;
     std::shared_ptr<websocket::stream<tcp::socket>> ws_;
@@ -278,6 +338,8 @@ private:
     std::shared_ptr<net::steady_timer> write_timer_;
     beast::flat_buffer buffer_;
     bool trigger = false;
+    int gripper_state_ = 0; // 0: open, 1: close
+
 
     std::deque<geometry_msgs::msg::PoseStamped::SharedPtr> pose_buffer_;
 };
