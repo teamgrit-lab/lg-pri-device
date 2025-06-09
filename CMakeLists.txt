@@ -88,4 +88,19 @@ install(TARGETS rgbd_camera_image_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
+
+
+add_executable(service_test src/service_test.cpp) # Your service server node
+target_link_libraries(service_test 
+  "${cpp_typesupport_target}"
+)
+ament_target_dependencies(service_test
+  rclcpp
+)
+install(TARGETS service_test
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+
+
 ament_package()
