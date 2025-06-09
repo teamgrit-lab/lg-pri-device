@@ -157,38 +157,6 @@ public:
             current_pose->pose.orientation.z = std::stof(j["orientation"]["y"].get<std::string>());
             current_pose->pose.orientation.w = std::stof(j["orientation"]["w"].get<std::string>());
 
-            ////////////////////////////////////////////
-            int gripper = j["gripper"].get<int>();
-            if (gripper == 1) {
-                gripper_state_ = 1;
-                json data;
-                data["pose"]["position"]["x"] = 0.0;
-                data["pose"]["position"]["y"] = 0.0;
-                data["pose"]["position"]["z"] = 0.0;
-                data["pose"]["orientation"]["x"] = 0.0;
-                data["pose"]["orientation"]["y"] = 0.0;
-                data["pose"]["orientation"]["z"] = 0.0;
-                data["pose"]["orientation"]["w"] = 1.0;
-                std::string request_data = data.dump();
-                std::string response = call_service(request_data);
-                RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
-            }
-            else if (gripper == 0) {
-                gripper_state_ = 0;
-                json data;
-                data["pose"]["position"]["x"] = 1.0;
-                data["pose"]["position"]["y"] = 0.0;
-                data["pose"]["position"]["z"] = 0.0;
-                data["pose"]["orientation"]["x"] = 0.0;
-                data["pose"]["orientation"]["y"] = 0.0;
-                data["pose"]["orientation"]["z"] = 0.0;
-                data["pose"]["orientation"]["w"] = 1.0;
-                std::string request_data = data.dump();
-                std::string response = call_service(request_data);
-                RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
-            }
-            ////////////////////////////////////////////
-
             pose_buffer_.push_back(current_pose);
             if (pose_buffer_.size() > 8) {
                 pose_buffer_.pop_front();
@@ -239,6 +207,43 @@ public:
             }
 
             pose_publisher_->publish(averaged_pose);
+
+
+            ////////////////////////////////////////////
+            try {
+                int gripper = j["gripper"].get<int>();
+                if (gripper == 1) {
+                    gripper_state_ = 1;
+                    json data;
+                    data["pose"]["position"]["x"] = 0.0;
+                    data["pose"]["position"]["y"] = 0.0;
+                    data["pose"]["position"]["z"] = 0.0;
+                    data["pose"]["orientation"]["x"] = 0.0;
+                    data["pose"]["orientation"]["y"] = 0.0;
+                    data["pose"]["orientation"]["z"] = 0.0;
+                    data["pose"]["orientation"]["w"] = 1.0;
+                    std::string request_data = data.dump();
+                    std::string response = call_service(request_data);
+                    RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
+                }
+                else if (gripper == 0) {
+                    gripper_state_ = 0;
+                    json data;
+                    data["pose"]["position"]["x"] = 1.0;
+                    data["pose"]["position"]["y"] = 0.0;
+                    data["pose"]["position"]["z"] = 0.0;
+                    data["pose"]["orientation"]["x"] = 0.0;
+                    data["pose"]["orientation"]["y"] = 0.0;
+                    data["pose"]["orientation"]["z"] = 0.0;
+                    data["pose"]["orientation"]["w"] = 1.0;
+                    std::string request_data = data.dump();
+                    std::string response = call_service(request_data);
+                    RCLCPP_INFO(this->get_logger(), "Service response: %s", response.c_str());
+                }
+            } catch (std::exception &e) {
+                RCLCPP_ERROR(this->get_logger(), "Error parsing gripper state from JSON: %s", e.what());
+            }
+            ////////////////////////////////////////////
         }
         catch (json::parse_error &e) {
             RCLCPP_ERROR(this->get_logger(), "Error parsing JSON: %s", e.what());
@@ -263,9 +268,7 @@ public:
             j_tf_data["orientation"]["y"] = transform_stamped.transform.rotation.z;
             j_tf_data["orientation"]["z"] = -transform_stamped.transform.rotation.x;
             j_tf_data["orientation"]["w"] = transform_stamped.transform.rotation.w;
-            ///////////////////////
             j_tf_data["gripper"] = gripper_state_;
-            /////////////////////////////
 
             std::string tf_json_str = j_tf_data.dump();
             if (!trigger){
