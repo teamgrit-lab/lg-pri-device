@@ -95,25 +95,23 @@ public:
         }
     }
 
-
-    std::string call_service(const int request_data) {
+    void call_service(const int request_data) {
         auto request = std::make_shared<lg_robot::srv::GripperCommand::Request>();
         request->command = request_data;
     
-        // 서비스 호출
-        // auto future = client_->send_request(request);
-        auto future = client_->async_send_request(request);
-        // 응답 출력
-
-        if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), future) != rclcpp::FutureReturnCode::SUCCESS) {
-            RCLCPP_ERROR(this->get_logger(), "서비스 호출 실패: %s", "navigate_to_pose_service");
-            return "";
-        } else {
-            auto response = future.get();
-            RCLCPP_INFO(this->get_logger(), "서비스 호출 성공: %s, 응답: %s", "navigate_to_pose_service", response->message.c_str());
-            gripper_state_ = response->result;
-            return response->message;
-        }
+        // Use async callback-based approach instead of spin_until_future_complete
+        auto callback = [this](rclcpp::Client<lg_robot::srv::GripperCommand>::SharedFuture future) {
+            try {
+                auto response = future.get();
+                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+                gripper_state_ = response->result;
+            } catch (const std::exception &e) {
+                RCLCPP_ERROR(this->get_logger(), "Service call failed: %s", e.what());
+            }
+        };
+    
+        // Send the request asynchronously
+        auto future_result = client_->async_send_request(request, callback);
     }
 
     void read()
@@ -212,7 +210,7 @@ public:
             ////////////////////////////////////////////
             try {
                 int gripper = j["gripper"].get<int>();
-                std::string response = call_service(gripper);
+                call_service(gripper);
             } catch (std::exception &e) {
                 RCLCPP_ERROR(this->get_logger(), "Error parsing gripper state from JSON: %s", e.what());
             }
