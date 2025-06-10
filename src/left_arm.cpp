@@ -13,6 +13,8 @@
 #include <thread>
 #include <deque>
 
+#include <gripper_interfaces/srv/gripper_command.hpp>
+
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
@@ -27,8 +29,11 @@ public:
         : Node("left_arm_node"), host_(host), port_(port), endpoint_(endpoint), mime_(mime), tf_buffer_(this->get_clock()), tf_listener_(tf_buffer_)
     {
         pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/left_arm_pose", 10);
+        pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/left_arm_pose_no_filter", 10);
 
-        tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&LeftArmNode::lookup_tf_and_send, this));
+        client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/left");
+        tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&LeftArmNode::lookup_tf_and_send, this));
+
         // Start the WebSocket connection
         try {
             tcp::resolver resolver(ioc_);
@@ -46,7 +51,7 @@ public:
             ws_->write(net::buffer(mime_));
             ws_->binary(true);
             read_timer_ = std::make_shared<boost::asio::steady_timer>(ioc_, std::chrono::milliseconds(10));
-            write_timer_ = std::make_shared<boost::asio::steady_timer>(ioc_, std::chrono::seconds(10));
+            write_timer_ = std::make_shared<boost::asio::steady_timer>(ioc_, std::chrono::milliseconds(20));
             io_thread_ = std::thread([this]() { ioc_.run(); });
             read();
             write();
@@ -89,6 +94,33 @@ public:
         }
     }
 
+    void call_service(const int request_data) {
+        auto request = std::make_shared<gripper_interfaces::srv::GripperCommand::Request>();
+        request->command = request_data;
+    
+        // Use async callback-based approach instead of spin_until_future_complete
+        auto callback = [this, request_data](rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedFuture future) {
+            try {
+                auto response = future.get();
+                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+                if (response->result) {
+                    if (request_data > 0) {
+                        gripper_state_ = true;
+                    }
+                    else {
+                        gripper_state_ = false;
+                    }
+                }
+//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+            } catch (const std::exception &e) {
+                RCLCPP_ERROR(this->get_logger(), "Service call failed: %s", e.what());
+            }
+        };
+    
+        // Send the request asynchronously
+        auto future_result = client_->async_send_request(request, callback);
+    }
+
     void read()
     {
         read_timer_->expires_after(std::chrono::milliseconds(10));
@@ -123,14 +155,14 @@ public:
             current_pose->header.frame_id = "base_link";
             current_pose->pose.position.x = -std::stof(j["position"]["z"].get<std::string>());
             current_pose->pose.position.y = -std::stof(j["position"]["x"].get<std::string>());
-            current_pose->pose.position.z = std::stof(j["position"]["y"].get<std::string>()) + 1.1;
+            current_pose->pose.position.z = std::stof(j["position"]["y"].get<std::string>());
             current_pose->pose.orientation.x = -std::stof(j["orientation"]["z"].get<std::string>());
             current_pose->pose.orientation.y = -std::stof(j["orientation"]["x"].get<std::string>());
             current_pose->pose.orientation.z = std::stof(j["orientation"]["y"].get<std::string>());
             current_pose->pose.orientation.w = std::stof(j["orientation"]["w"].get<std::string>());
 
             pose_buffer_.push_back(current_pose);
-            if (pose_buffer_.size() > 3) {
+            if (pose_buffer_.size() > 8) {
                 pose_buffer_.pop_front();
             }
 
@@ -145,19 +177,25 @@ public:
             double sum_qz = 0.0;
             double sum_qw = 0.0;
 
+            double sum_exp = 0.0;
+            int count = 0;
             for (const auto& pose_msg : pose_buffer_) {
-                sum_x += pose_msg->pose.position.x;
-                sum_y += pose_msg->pose.position.y;
-                sum_z += pose_msg->pose.position.z;
+                sum_exp += std::exp(count / 20.0);
+                sum_x += pose_msg->pose.position.x * std::exp(count / 20.0);
+                sum_y += pose_msg->pose.position.y * std::exp(count / 20.0);
+                sum_z += pose_msg->pose.position.z * std::exp(count / 20.0);
+
+                count++;
+
                 sum_qx += pose_msg->pose.orientation.x;
                 sum_qy += pose_msg->pose.orientation.y;
                 sum_qz += pose_msg->pose.orientation.z;
                 sum_qw += pose_msg->pose.orientation.w;
             }
 
-            averaged_pose.pose.position.x = sum_x / pose_buffer_.size();
-            averaged_pose.pose.position.y = sum_y / pose_buffer_.size();
-            averaged_pose.pose.position.z = sum_z / pose_buffer_.size();
+            averaged_pose.pose.position.x = sum_x / sum_exp;
+            averaged_pose.pose.position.y = sum_y / sum_exp;
+            averaged_pose.pose.position.z = sum_z / sum_exp;
 
             averaged_pose.pose.orientation.x = sum_qx / pose_buffer_.size();
             averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
@@ -173,21 +211,15 @@ public:
             }
 
             pose_publisher_->publish(averaged_pose);
+            pose_publisher_no_filter->publish(*current_pose);
 
 
-
-//            json j = json::parse(message);
-//            auto pose_msg = std::make_shared<geometry_msgs::msg::PoseStamped>();
-//            pose_msg->header.stamp = this->now();
-//            pose_msg->header.frame_id = "arm";
-//            pose_msg->pose.position.x = -std::stof(j["position"]["z"].get<std::string>());
-//            pose_msg->pose.position.y = -std::stof(j["position"]["x"].get<std::string>());
-//            pose_msg->pose.position.z = std::stof(j["position"]["y"].get<std::string>());
-//            pose_msg->pose.orientation.x = -std::stof(j["orientation"]["z"].get<std::string>());
-//            pose_msg->pose.orientation.y = -std::stof(j["orientation"]["x"].get<std::string>());
-//            pose_msg->pose.orientation.z = std::stof(j["orientation"]["y"].get<std::string>());
-//            pose_msg->pose.orientation.w = std::stof(j["orientation"]["w"].get<std::string>());
-//            pose_publisher_->publish(*pose_msg);
+            try {
+                int gripper = j["gripper"].get<int>();
+                call_service(gripper);
+            } catch (std::exception &e) {
+                RCLCPP_ERROR(this->get_logger(), "Error parsing gripper state from JSON: %s", e.what());
+            }
         }
         catch (json::parse_error &e) {
             RCLCPP_ERROR(this->get_logger(), "Error parsing JSON: %s", e.what());
@@ -198,27 +230,31 @@ public:
         read();
     }
 
-
     void lookup_tf_and_send() {
         try{
+//            if (tf_is_running_) {
+//                return;
+//            }
+//            tf_is_running_ = true;
             geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_.lookupTransform("base_link", "wrist3_link_left", tf2::TimePointZero);
 
             json j_tf_data;
             j_tf_data["type"] = "type_pose";
             j_tf_data["handedness"] = "left";
             j_tf_data["position"]["x"] = -transform_stamped.transform.translation.y;
-            j_tf_data["position"]["y"] = transform_stamped.transform.translation.z - 1.1;
+            j_tf_data["position"]["y"] = transform_stamped.transform.translation.z;
             j_tf_data["position"]["z"] = -transform_stamped.transform.translation.x;
             j_tf_data["orientation"]["x"] = -transform_stamped.transform.rotation.y;
             j_tf_data["orientation"]["y"] = transform_stamped.transform.rotation.z;
             j_tf_data["orientation"]["z"] = -transform_stamped.transform.rotation.x;
             j_tf_data["orientation"]["w"] = transform_stamped.transform.rotation.w;
+            j_tf_data["gripper"] = gripper_state_;
 
-            std::string tf_json_str = j_tf_data.dump();
+            tf_json_str = j_tf_data.dump();
             if (!trigger){
                 trigger = true;
             }
-            ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&LeftArmNode::on_tf_write, this));
+//            ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&LeftArmNode::on_tf_write, this));
         } catch (const tf2::TransformException &ex) {
             RCLCPP_WARN(this->get_logger(), "Could not transform base_link to wrist3_link_left: %s", ex.what());
         } catch (const std::exception& e) {
@@ -227,6 +263,7 @@ public:
     }
 
     void on_tf_write(beast::error_code ec, std::size_t bytes_transferred) {
+//        tf_is_running_ = false;
         if (ec) {
             RCLCPP_ERROR(this->get_logger(), "Error writing TF to WebSocket: %s", ec.message().c_str());
         } else {
@@ -236,7 +273,14 @@ public:
 
     void write()
     {
-        write_timer_->expires_after(std::chrono::seconds(10));
+        write_timer_->expires_after(std::chrono::milliseconds(20));
+        if (trigger) {
+            trigger = false;
+            write();
+            return;
+        }
+
+
         write_timer_->async_wait([this](const beast::error_code &ec) {
             if (ec) {
                 RCLCPP_ERROR(this->get_logger(), "Error in write timer: %s", ec.message().c_str());
@@ -244,8 +288,9 @@ public:
                 write();
                 return;
             }
-            std::string ping = "ping";
-            ws_->async_write(net::buffer(ping), beast::bind_front_handler(&LeftArmNode::on_write, this));
+//            std::string ping = "ping";
+//            ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&LeftArmNode::on_tf_write, this));
+            ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&LeftArmNode::on_write, this));
         });
     }
 
@@ -262,9 +307,11 @@ public:
 
 private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_no_filter;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
+    rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedPtr client_;
 
     net::io_context ioc_;
     std::shared_ptr<websocket::stream<tcp::socket>> ws_;
@@ -277,6 +324,13 @@ private:
     std::shared_ptr<net::steady_timer> write_timer_;
     beast::flat_buffer buffer_;
     bool trigger = false;
+    bool gripper_state_ = false;
+
+
+    std::string tf_json_str = "";
+
+//    bool tf_is_running_ = false;
+
 
     std::deque<geometry_msgs::msg::PoseStamped::SharedPtr> pose_buffer_;
 };
