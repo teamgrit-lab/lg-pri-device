@@ -195,9 +195,9 @@ private:
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    std::string host = "cobot.center";
-    std::string port = "8286";
-    std::string endpoint = "/pang/ws/pub?channel=instant&name=LG_robot&track=ai&mode=bundle";
+    std::string host = "";
+    std::string port = "";
+    std::string endpoint = "";
     std::string mime = "text/json";
 
     auto node = std::make_shared<AiBoundingBoxPublisher>(host, port, endpoint, mime);
