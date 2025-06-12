@@ -10,6 +10,7 @@ find_package(Boost REQUIRED COMPONENTS system thread)
 find_package(PkgConfig REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
 find_package(rosidl_default_generators REQUIRED)
@@ -38,6 +39,7 @@ ament_target_dependencies(left_arm_node
   geometry_msgs
   nlohmann_json
   tf2
+  std_msgs
   tf2_ros
   tf2_geometry_msgs
 )
@@ -58,6 +60,7 @@ ament_target_dependencies(right_arm_node
   geometry_msgs
   nlohmann_json
   tf2
+  std_msgs
   tf2_ros
   tf2_geometry_msgs
 )
