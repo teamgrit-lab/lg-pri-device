@@ -3,6 +3,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 #include <nlohmann/json.hpp>
 #include <boost/beast/core.hpp>
@@ -30,6 +31,7 @@ public:
     {
         pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/left_arm_pose", 10);
         pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/left_arm_pose_no_filter", 10);
+        sync_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/left_arm_sync_trigger", 10);
 
         client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/left");
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&LeftArmNode::lookup_tf_and_send, this));
@@ -220,6 +222,20 @@ public:
             } catch (std::exception &e) {
                 RCLCPP_ERROR(this->get_logger(), "Error parsing gripper state from JSON: %s", e.what());
             }
+
+            try
+            {
+                if (j.contains("sync"))
+                {
+                    auto sync_msg = std_msgs::msg::Bool();
+                    sync_msg.data = j["sync"].get<bool>();
+                    sync_publisher_->publish(sync_msg);
+                }
+            }
+            catch (const json::exception &e)
+            {
+                RCLCPP_ERROR(this->get_logger(), "Error parsing sync from JSON: %s", e.what());
+            }
         }
         catch (json::parse_error &e) {
             RCLCPP_ERROR(this->get_logger(), "Error parsing JSON: %s", e.what());
@@ -308,6 +324,7 @@ public:
 private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_no_filter;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr sync_publisher_;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
