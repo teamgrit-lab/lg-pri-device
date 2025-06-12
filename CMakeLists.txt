@@ -12,15 +12,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-
-find_package(rosidl_default_generators REQUIRED)
-
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "srv/GripperCommand.srv"
-)
-
-# Add this line to get the typesupport target
-rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+find_package(gripper_interfaces REQUIRED)
 
 pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
 pkg_check_modules(GSTREAMER_APP REQUIRED gstreamer-app-1.0)
@@ -32,7 +24,6 @@ target_link_libraries(left_arm_node
   Boost::system 
   Boost::thread 
   pthread
-  "${cpp_typesupport_target}"
 )
 ament_target_dependencies(left_arm_node
   rclcpp
@@ -42,6 +33,7 @@ ament_target_dependencies(left_arm_node
   std_msgs
   tf2_ros
   tf2_geometry_msgs
+  gripper_interfaces
 )
 install(TARGETS left_arm_node
   DESTINATION lib/${PROJECT_NAME}
@@ -53,7 +45,6 @@ target_link_libraries(right_arm_node
   Boost::system 
   Boost::thread 
   pthread
-  "${cpp_typesupport_target}"
 )
 ament_target_dependencies(right_arm_node
   rclcpp
@@ -63,20 +54,12 @@ ament_target_dependencies(right_arm_node
   std_msgs
   tf2_ros
   tf2_geometry_msgs
+  gripper_interfaces
 )
 install(TARGETS right_arm_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# add_executable(head_camera_node src/head_camera.cpp)
-# target_link_libraries(head_camera_node Boost::system Boost::thread pthread /usr/local/lib/libdraco.a)
-# ament_target_dependencies(head_camera_node
-#   rclcpp
-#   sensor_msgs
-# )
-# install(TARGETS head_camera_node
-#   DESTINATION lib/${PROJECT_NAME}
-# )
 
 add_executable(rgbd_camera_image_node src/rgbd_camera_image.cpp)
 target_include_directories(rgbd_camera_image_node PUBLIC
@@ -90,20 +73,6 @@ ament_target_dependencies(rgbd_camera_image_node
 install(TARGETS rgbd_camera_image_node
   DESTINATION lib/${PROJECT_NAME}
 )
-
-
-
-add_executable(service_test src/service_test.cpp) # Your service server node
-target_link_libraries(service_test 
-  "${cpp_typesupport_target}"
-)
-ament_target_dependencies(service_test
-  rclcpp
-)
-install(TARGETS service_test
-  DESTINATION lib/${PROJECT_NAME}
-)
-
 
 
 ament_package()
