@@ -16,6 +16,7 @@
 
 // #include <gripper_interfaces/srv/gripper_command.hpp>
 #include <grp_control_msg/srv/single_int.hpp>
+#include <grp_control_msg/srv/void.hpp>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
