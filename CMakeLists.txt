@@ -14,7 +14,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(gripper_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(yolo_msgs REQUIRED)
-find_package(grp_control_msg REQUIRED)
+
 
 pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
 pkg_check_modules(GSTREAMER_APP REQUIRED gstreamer-app-1.0)
@@ -55,7 +55,6 @@ ament_target_dependencies(right_arm_node
   tf2_ros
   tf2_geometry_msgs
   gripper_interfaces
-  grp_control_msg
 )
 install(TARGETS right_arm_node
   DESTINATION lib/${PROJECT_NAME}
