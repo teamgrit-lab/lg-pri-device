@@ -123,7 +123,7 @@ public:
                 //     else {
                 //         gripper_state_ = false;
                 //     }
-                }
+                // }
 //                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
             } catch (const std::exception &e) {
                 RCLCPP_ERROR(this->get_logger(), "Service call failed: %s", e.what());
