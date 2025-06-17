@@ -15,6 +15,7 @@
 #include <deque>
 
 #include <gripper_interfaces/srv/gripper_command.hpp>
+#include <grp_control_msg/msg/gripper_msg.hpp>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -32,7 +33,7 @@ public:
         pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose", 10);
         pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose_no_filter", 10);
         sync_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/right_arm_sync_trigger", 10);
-        ai_mode_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/ai_mode_trigger", 10);
+        ai_mode_publisher_ = this->create_publisher<grp_control_msg::msg::GripperMsg>("/ai_mode_trigger", 10);
 
         client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/right");
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&RightArmNode::lookup_tf_and_send, this));
@@ -262,8 +263,14 @@ public:
             sync_msg.data = sync_;
             sync_publisher_->publish(sync_msg);
 
-            auto ai_mode_msg = std_msgs::msg::Bool();
-            ai_mode_msg.data = ai_mode_;
+            auto ai_mode_msg = grp_control_msg::msg::GripperMsg();
+            if (ai_mode_) {
+                ai_mode_msg.grp_opened = 0; // Assuming 1 means AI mode is enabled
+                ai_mode_msg.grp_closed = 1; // Assuming 1 means AI mode is enabled
+            } else {
+                ai_mode_msg.grp_opened = 1; // Assuming 1 means AI mode is enabled
+                ai_mode_msg.grp_closed = 0; // Assuming 1 means AI mode is enabled
+            }
             ai_mode_publisher_->publish(ai_mode_msg);
 
         } catch (const std::exception& e) {
@@ -344,7 +351,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_no_filter;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr sync_publisher_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ai_mode_publisher_;
+    rclcpp::Publisher<grp_control_msg::msg::GripperMsg>::SharedPtr ai_mode_publisher_;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
