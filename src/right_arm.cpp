@@ -14,7 +14,8 @@
 #include <thread>
 #include <deque>
 
-#include <gripper_interfaces/srv/gripper_command.hpp>
+// #include <gripper_interfaces/srv/gripper_command.hpp>
+#include <grp_control_msg/srv/single_int.hpp>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -34,7 +35,12 @@ public:
         sync_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/right_arm_sync_trigger", 10);
         ai_mode_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/ai_mode_trigger", 10);
 
-        client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/right");
+//        client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/right");
+        select_gripper_client_ = this->create_client<grp_control_msg::srv::SingleInt>("/modbus_slave_change");
+        gripper_open_client_ = this->create_client<grp_control_msg::srv::Void>("/grp_open");
+        gripper_close_client_ = this->create_client<grp_control_msg::srv::Void>("/grp_close");
+
+        
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&RightArmNode::lookup_tf_and_send, this));
 
         sync_publisher_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&RightArmNode::sync_publisher_timer_callback, this));
@@ -100,15 +106,34 @@ public:
     }
 
     void call_service(const int request_data) {
-        auto request = std::make_shared<gripper_interfaces::srv::GripperCommand::Request>();
-        request->command = request_data;
+        auto request = std::make_shared<grp_control_msg::srv::SingleInt>();
+        request->value = 2;
+        auto gripper_request = std::make_shared<grp_control_msg::srv::Void>();
     
         // Use async callback-based approach instead of spin_until_future_complete
-        auto callback = [this, request_data](rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedFuture future) {
+        auto callback = [this](rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedFuture future) {
             try {
                 auto response = future.get();
                 RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
-                if (response->result) {
+                // if (response->successed) {
+                //     if (request_data > 0) {
+                //         gripper_state_ = true;
+                //     }
+                //     else {
+                //         gripper_state_ = false;
+                //     }
+                }
+//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+            } catch (const std::exception &e) {
+                RCLCPP_ERROR(this->get_logger(), "Service call failed: %s", e.what());
+            }
+        };
+
+        auto gripper_callback = [this, request_data](rclcpp::Client<grp_control_msg::srv::Void>::SharedFuture future) {
+            try {
+                auto response = future.get();
+                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+                if (response->successed) {
                     if (request_data > 0) {
                         gripper_state_ = true;
                     }
@@ -123,7 +148,12 @@ public:
         };
     
         // Send the request asynchronously
-        auto future_result = client_->async_send_request(request, callback);
+        auto future_result = select_gripper_client_->async_send_request(request, callback);
+        if (request_data == 1) {
+            auto open_result = gripper_open_client_->async_send_request(gripper_request, gripper_callback);
+        } else {
+            auto close_result = gripper_close_client_->async_send_request(gripper_request, gripper_callback);
+        }
     }
 
     void read()
@@ -348,7 +378,10 @@ private:
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
-    rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedPtr client_;
+//    rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedPtr client_;
+    rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedPtr select_gripper_client_;
+    rclcpp::Client<grp_control_msg::srv::Void>::SharedPtr gripper_open_client_;
+    rclcpp::Client<grp_control_msg::srv::Void>::SharedPtr gripper_close_client_;
 
     rclcpp::TimerBase::SharedPtr sync_publisher_timer_;
 
