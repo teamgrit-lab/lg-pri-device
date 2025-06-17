@@ -115,7 +115,7 @@ public:
         auto callback = [this](rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedFuture future) {
             try {
                 auto response = future.get();
-                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
                 // if (response->successed) {
                 //     if (request_data > 0) {
                 //         gripper_state_ = true;
@@ -133,7 +133,7 @@ public:
         auto gripper_callback = [this, request_data](rclcpp::Client<grp_control_msg::srv::Void>::SharedFuture future) {
             try {
                 auto response = future.get();
-                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
                 if (response->successed) {
                     if (request_data > 0) {
                         gripper_state_ = true;
