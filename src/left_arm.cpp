@@ -157,7 +157,7 @@ public:
             current_pose->header.frame_id = "base_link";
             current_pose->pose.position.x = -std::stof(j["position"]["z"].get<std::string>());
             current_pose->pose.position.y = -std::stof(j["position"]["x"].get<std::string>());
-            current_pose->pose.position.z = std::stof(j["position"]["y"].get<std::string>());
+            current_pose->pose.position.z = std::stof(j["position"]["y"].get<std::string>()) + 1.1;
             current_pose->pose.orientation.x = -std::stof(j["orientation"]["z"].get<std::string>());
             current_pose->pose.orientation.y = -std::stof(j["orientation"]["x"].get<std::string>());
             current_pose->pose.orientation.z = std::stof(j["orientation"]["y"].get<std::string>());
@@ -189,28 +189,30 @@ public:
 
                 count++;
 
-                sum_qx += pose_msg->pose.orientation.x;
-                sum_qy += pose_msg->pose.orientation.y;
-                sum_qz += pose_msg->pose.orientation.z;
-                sum_qw += pose_msg->pose.orientation.w;
+//                sum_qx += pose_msg->pose.orientation.x;
+//                sum_qy += pose_msg->pose.orientation.y;
+//                sum_qz += pose_msg->pose.orientation.z;
+//                sum_qw += pose_msg->pose.orientation.w;
             }
 
             averaged_pose.pose.position.x = sum_x / sum_exp;
             averaged_pose.pose.position.y = sum_y / sum_exp;
             averaged_pose.pose.position.z = sum_z / sum_exp;
 
-            averaged_pose.pose.orientation.x = sum_qx / pose_buffer_.size();
-            averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
-            averaged_pose.pose.orientation.z = sum_qz / pose_buffer_.size();
-            averaged_pose.pose.orientation.w = sum_qw / pose_buffer_.size();
+            averaged_pose.pose.orientation = current_pose->pose.orientation;
 
-            double norm = std::sqrt(averaged_pose.pose.orientation.x * averaged_pose.pose.orientation.x + averaged_pose.pose.orientation.y * averaged_pose.pose.orientation.y + averaged_pose.pose.orientation.z * averaged_pose.pose.orientation.z + averaged_pose.pose.orientation.w * averaged_pose.pose.orientation.w);
-            if (norm != 0) {
-                averaged_pose.pose.orientation.x /= norm;
-                averaged_pose.pose.orientation.y /= norm;
-                averaged_pose.pose.orientation.z /= norm;
-                averaged_pose.pose.orientation.w /= norm;
-            }
+//            averaged_pose.pose.orientation.x = sum_qx / pose_buffer_.size();
+//            averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
+//            averaged_pose.pose.orientation.z = sum_qz / pose_buffer_.size();
+//            averaged_pose.pose.orientation.w = sum_qw / pose_buffer_.size();
+//
+//            double norm = std::sqrt(averaged_pose.pose.orientation.x * averaged_pose.pose.orientation.x + averaged_pose.pose.orientation.y * averaged_pose.pose.orientation.y + averaged_pose.pose.orientation.z * averaged_pose.pose.orientation.z + averaged_pose.pose.orientation.w * averaged_pose.pose.orientation.w);
+//            if (norm != 0) {
+//                averaged_pose.pose.orientation.x /= norm;
+//                averaged_pose.pose.orientation.y /= norm;
+//                averaged_pose.pose.orientation.z /= norm;
+//                averaged_pose.pose.orientation.w /= norm;
+//            }
 
             pose_publisher_->publish(averaged_pose);
             pose_publisher_no_filter->publish(*current_pose);
@@ -258,7 +260,7 @@ public:
             j_tf_data["type"] = "type_pose";
             j_tf_data["handedness"] = "left";
             j_tf_data["position"]["x"] = -transform_stamped.transform.translation.y;
-            j_tf_data["position"]["y"] = transform_stamped.transform.translation.z;
+            j_tf_data["position"]["y"] = transform_stamped.transform.translation.z - 1.1;
             j_tf_data["position"]["z"] = -transform_stamped.transform.translation.x;
             j_tf_data["orientation"]["x"] = -transform_stamped.transform.rotation.y;
             j_tf_data["orientation"]["y"] = transform_stamped.transform.rotation.z;
