@@ -33,7 +33,7 @@ public:
         pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose", 10);
         pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose_no_filter", 10);
         sync_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/right_arm_sync_trigger", 10);
-        ai_mode_publisher_ = this->create_publisher<grp_control_msg::msg::GripperMsg>("/ai_mode_trigger", 10);
+        ai_mode_publisher_ = this->create_publisher<grp_control_msg::msg::GripperMsg>("/grp_state", 10);
 
         client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/right");
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&RightArmNode::lookup_tf_and_send, this));
