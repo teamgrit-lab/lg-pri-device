@@ -107,9 +107,9 @@ public:
     }
 
     void call_service(const int request_data) {
-        auto request = std::make_shared<grp_control_msg::srv::SingleInt>();
+        auto request = std::make_shared<grp_control_msg::srv::SingleInt::Request>();
         request->value = 2;
-        auto gripper_request = std::make_shared<grp_control_msg::srv::Void>();
+        auto gripper_request = std::make_shared<grp_control_msg::srv::Void::Request>();
     
         // Use async callback-based approach instead of spin_until_future_complete
         auto callback = [this](rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedFuture future) {
