@@ -32,9 +32,12 @@ public:
         pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose", 10);
         pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose_no_filter", 10);
         sync_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/right_arm_sync_trigger", 10);
+        ai_mode_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/ai_mode_trigger", 10);
 
         client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/right");
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&RightArmNode::lookup_tf_and_send, this));
+
+        sync_publisher_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&RightArmNode::sync_publisher_timer_callback, this));
 
         // Start the WebSocket connection
         try {
@@ -157,14 +160,14 @@ public:
             current_pose->header.frame_id = "base_link";
             current_pose->pose.position.x = -std::stof(j["position"]["z"].get<std::string>());
             current_pose->pose.position.y = -std::stof(j["position"]["x"].get<std::string>());
-            current_pose->pose.position.z = std::stof(j["position"]["y"].get<std::string>());
+            current_pose->pose.position.z = std::stof(j["position"]["y"].get<std::string>()) + 1.1;
             current_pose->pose.orientation.x = -std::stof(j["orientation"]["z"].get<std::string>());
             current_pose->pose.orientation.y = -std::stof(j["orientation"]["x"].get<std::string>());
             current_pose->pose.orientation.z = std::stof(j["orientation"]["y"].get<std::string>());
             current_pose->pose.orientation.w = std::stof(j["orientation"]["w"].get<std::string>());
 
             pose_buffer_.push_back(current_pose);
-            if (pose_buffer_.size() > 8) {
+            if (pose_buffer_.size() > 12) {
                 pose_buffer_.pop_front();
             }
 
@@ -182,35 +185,37 @@ public:
             double sum_exp = 0.0;
             int count = 0;
             for (const auto& pose_msg : pose_buffer_) {
-                sum_exp += std::exp(count / 20.0);
-                sum_x += pose_msg->pose.position.x * std::exp(count / 20.0);
-                sum_y += pose_msg->pose.position.y * std::exp(count / 20.0);
-                sum_z += pose_msg->pose.position.z * std::exp(count / 20.0);
+                sum_exp += std::exp((count / 12.0) - 1);
+                sum_x += pose_msg->pose.position.x * std::exp((count / 12.0) - 1);
+                sum_y += pose_msg->pose.position.y * std::exp((count / 12.0) - 1);
+                sum_z += pose_msg->pose.position.z * std::exp((count / 12.0) - 1);
 
                 count++;
 
-                sum_qx += pose_msg->pose.orientation.x;
-                sum_qy += pose_msg->pose.orientation.y;
-                sum_qz += pose_msg->pose.orientation.z;
-                sum_qw += pose_msg->pose.orientation.w;
+//                sum_qx += pose_msg->pose.orientation.x;
+//                sum_qy += pose_msg->pose.orientation.y;
+//                sum_qz += pose_msg->pose.orientation.z;
+//                sum_qw += pose_msg->pose.orientation.w;
             }
 
             averaged_pose.pose.position.x = sum_x / sum_exp;
             averaged_pose.pose.position.y = sum_y / sum_exp;
             averaged_pose.pose.position.z = sum_z / sum_exp;
 
-            averaged_pose.pose.orientation.x = sum_qx / pose_buffer_.size();
-            averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
-            averaged_pose.pose.orientation.z = sum_qz / pose_buffer_.size();
-            averaged_pose.pose.orientation.w = sum_qw / pose_buffer_.size();
+            averaged_pose.pose.orientation = current_pose->pose.orientation;
 
-            double norm = std::sqrt(averaged_pose.pose.orientation.x * averaged_pose.pose.orientation.x + averaged_pose.pose.orientation.y * averaged_pose.pose.orientation.y + averaged_pose.pose.orientation.z * averaged_pose.pose.orientation.z + averaged_pose.pose.orientation.w * averaged_pose.pose.orientation.w);
-            if (norm != 0) {
-                averaged_pose.pose.orientation.x /= norm;
-                averaged_pose.pose.orientation.y /= norm;
-                averaged_pose.pose.orientation.z /= norm;
-                averaged_pose.pose.orientation.w /= norm;
-            }
+//            averaged_pose.pose.orientation.x = sum_qx / pose_buffer_.size();
+//            averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
+//            averaged_pose.pose.orientation.z = sum_qz / pose_buffer_.size();
+//            averaged_pose.pose.orientation.w = sum_qw / pose_buffer_.size();
+
+//            double norm = std::sqrt(averaged_pose.pose.orientation.x * averaged_pose.pose.orientation.x + averaged_pose.pose.orientation.y * averaged_pose.pose.orientation.y + averaged_pose.pose.orientation.z * averaged_pose.pose.orientation.z + averaged_pose.pose.orientation.w * averaged_pose.pose.orientation.w);
+//            if (norm != 0) {
+//                averaged_pose.pose.orientation.x /= norm;
+//                averaged_pose.pose.orientation.y /= norm;
+//                averaged_pose.pose.orientation.z /= norm;
+//                averaged_pose.pose.orientation.w /= norm;
+//            }
 
             pose_publisher_->publish(averaged_pose);
             pose_publisher_no_filter->publish(*current_pose);
@@ -227,9 +232,14 @@ public:
             {
                 if (j.contains("sync"))
                 {
-                    auto sync_msg = std_msgs::msg::Bool();
-                    sync_msg.data = j["sync"].get<bool>();
-                    sync_publisher_->publish(sync_msg);
+                    sync_ = j["sync"].get<bool>();
+//                    auto sync_msg = std_msgs::msg::Bool();
+//                    sync_msg.data = j["sync"].get<bool>();
+//                    sync_publisher_->publish(sync_msg);
+                }
+                if (j.contains("ai_mode"))
+                {
+                    ai_mode_ = j["ai_mode"].get<bool>();
                 }
             }
             catch (const json::exception &e)
@@ -246,19 +256,30 @@ public:
         read();
     }
 
+    void sync_publisher_timer_callback() {
+        try {
+            auto sync_msg = std_msgs::msg::Bool();
+            sync_msg.data = sync_;
+            sync_publisher_->publish(sync_msg);
+
+            auto ai_mode_msg = std_msgs::msg::Bool();
+            ai_mode_msg.data = ai_mode_;
+            ai_mode_publisher_->publish(ai_mode_msg);
+
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Error sync_publisher: %s", e.what());
+        }
+    }
+
     void lookup_tf_and_send() {
         try{
-//            if (tf_is_running_) {
-//                return;
-//            }
-//            tf_is_running_ = true;
             geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_.lookupTransform("base_link", "wrist3_link_right", tf2::TimePointZero);
 
             json j_tf_data;
             j_tf_data["type"] = "type_pose";
             j_tf_data["handedness"] = "right";
             j_tf_data["position"]["x"] = -transform_stamped.transform.translation.y;
-            j_tf_data["position"]["y"] = transform_stamped.transform.translation.z;
+            j_tf_data["position"]["y"] = transform_stamped.transform.translation.z - 1.1;
             j_tf_data["position"]["z"] = -transform_stamped.transform.translation.x;
             j_tf_data["orientation"]["x"] = -transform_stamped.transform.rotation.y;
             j_tf_data["orientation"]["y"] = transform_stamped.transform.rotation.z;
@@ -304,8 +325,6 @@ public:
                 write();
                 return;
             }
-//            std::string ping = "ping";
-//            ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&RightArmNode::on_tf_write, this));
             ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&RightArmNode::on_write, this));
         });
     }
@@ -325,10 +344,13 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_no_filter;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr sync_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ai_mode_publisher_;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
     rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedPtr client_;
+
+    rclcpp::TimerBase::SharedPtr sync_publisher_timer_;
 
     net::io_context ioc_;
     std::shared_ptr<websocket::stream<tcp::socket>> ws_;
@@ -342,7 +364,8 @@ private:
     beast::flat_buffer buffer_;
     bool trigger = false;
     bool gripper_state_ = false;
-
+    bool sync_ = false;
+    bool ai_mode_ = false;
 
     std::string tf_json_str = "";
 
