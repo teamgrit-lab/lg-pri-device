@@ -14,7 +14,8 @@
 #include <thread>
 #include <deque>
 
-#include <gripper_interfaces/srv/gripper_command.hpp>
+// #include <gripper_interfaces/srv/gripper_command.hpp>
+#include <grp_control_msg/srv/single_int.hpp>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -33,8 +34,15 @@ public:
         pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/left_arm_pose_no_filter", 10);
         sync_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/left_arm_sync_trigger", 10);
 
-        client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/left");
+//        client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/left");
+        select_gripper_client_ = this->create_client<grp_control_msg::srv::SingleInt>("/modbus_slave_change");
+        gripper_open_client_ = this->create_client<grp_control_msg::srv::Void>("/grp_open");
+        gripper_close_client_ = this->create_client<grp_control_msg::srv::Void>("/grp_close");
+
+        
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&LeftArmNode::lookup_tf_and_send, this));
+
+        sync_publisher_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&LeftArmNode::sync_publisher_timer_callback, this));
 
         // Start the WebSocket connection
         try {
@@ -97,15 +105,34 @@ public:
     }
 
     void call_service(const int request_data) {
-        auto request = std::make_shared<gripper_interfaces::srv::GripperCommand::Request>();
-        request->command = request_data;
+        auto request = std::make_shared<grp_control_msg::srv::SingleInt>();
+        request->value = 1;
+        auto gripper_request = std::make_shared<grp_control_msg::srv::Void>();
     
         // Use async callback-based approach instead of spin_until_future_complete
-        auto callback = [this, request_data](rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedFuture future) {
+        auto callback = [this](rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedFuture future) {
             try {
                 auto response = future.get();
                 RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
-                if (response->result) {
+                // if (response->successed) {
+                //     if (request_data > 0) {
+                //         gripper_state_ = true;
+                //     }
+                //     else {
+                //         gripper_state_ = false;
+                //     }
+                }
+//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+            } catch (const std::exception &e) {
+                RCLCPP_ERROR(this->get_logger(), "Service call failed: %s", e.what());
+            }
+        };
+
+        auto gripper_callback = [this, request_data](rclcpp::Client<grp_control_msg::srv::Void>::SharedFuture future) {
+            try {
+                auto response = future.get();
+                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
+                if (response->successed) {
                     if (request_data > 0) {
                         gripper_state_ = true;
                     }
@@ -120,7 +147,12 @@ public:
         };
     
         // Send the request asynchronously
-        auto future_result = client_->async_send_request(request, callback);
+        auto future_result = select_gripper_client_->async_send_request(request, callback);
+        if (request_data == 1) {
+            auto open_result = gripper_open_client_->async_send_request(gripper_request, gripper_callback);
+        } else {
+            auto close_result = gripper_close_client_->async_send_request(gripper_request, gripper_callback);
+        }
     }
 
     void read()
@@ -164,7 +196,7 @@ public:
             current_pose->pose.orientation.w = std::stof(j["orientation"]["w"].get<std::string>());
 
             pose_buffer_.push_back(current_pose);
-            if (pose_buffer_.size() > 8) {
+            if (pose_buffer_.size() > 12) {
                 pose_buffer_.pop_front();
             }
 
@@ -182,10 +214,10 @@ public:
             double sum_exp = 0.0;
             int count = 0;
             for (const auto& pose_msg : pose_buffer_) {
-                sum_exp += std::exp(count / 20.0);
-                sum_x += pose_msg->pose.position.x * std::exp(count / 20.0);
-                sum_y += pose_msg->pose.position.y * std::exp(count / 20.0);
-                sum_z += pose_msg->pose.position.z * std::exp(count / 20.0);
+                sum_exp += std::exp((count / 12.0) - 1);
+                sum_x += pose_msg->pose.position.x * std::exp((count / 12.0) - 1);
+                sum_y += pose_msg->pose.position.y * std::exp((count / 12.0) - 1);
+                sum_z += pose_msg->pose.position.z * std::exp((count / 12.0) - 1);
 
                 count++;
 
@@ -205,7 +237,7 @@ public:
 //            averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
 //            averaged_pose.pose.orientation.z = sum_qz / pose_buffer_.size();
 //            averaged_pose.pose.orientation.w = sum_qw / pose_buffer_.size();
-//
+
 //            double norm = std::sqrt(averaged_pose.pose.orientation.x * averaged_pose.pose.orientation.x + averaged_pose.pose.orientation.y * averaged_pose.pose.orientation.y + averaged_pose.pose.orientation.z * averaged_pose.pose.orientation.z + averaged_pose.pose.orientation.w * averaged_pose.pose.orientation.w);
 //            if (norm != 0) {
 //                averaged_pose.pose.orientation.x /= norm;
@@ -229,9 +261,14 @@ public:
             {
                 if (j.contains("sync"))
                 {
-                    auto sync_msg = std_msgs::msg::Bool();
-                    sync_msg.data = j["sync"].get<bool>();
-                    sync_publisher_->publish(sync_msg);
+                    sync_ = j["sync"].get<bool>();
+//                    auto sync_msg = std_msgs::msg::Bool();
+//                    sync_msg.data = j["sync"].get<bool>();
+//                    sync_publisher_->publish(sync_msg);
+                }
+                if (j.contains("ai_mode"))
+                {
+                    ai_mode_ = j["ai_mode"].get<bool>();
                 }
             }
             catch (const json::exception &e)
@@ -248,12 +285,20 @@ public:
         read();
     }
 
+    void sync_publisher_timer_callback() {
+        try {
+            auto sync_msg = std_msgs::msg::Bool();
+            sync_msg.data = sync_;
+            sync_publisher_->publish(sync_msg);
+
+
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Error sync_publisher: %s", e.what());
+        }
+    }
+
     void lookup_tf_and_send() {
         try{
-//            if (tf_is_running_) {
-//                return;
-//            }
-//            tf_is_running_ = true;
             geometry_msgs::msg::TransformStamped transform_stamped = tf_buffer_.lookupTransform("base_link", "wrist3_link_left", tf2::TimePointZero);
 
             json j_tf_data;
@@ -306,8 +351,6 @@ public:
                 write();
                 return;
             }
-//            std::string ping = "ping";
-//            ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&LeftArmNode::on_tf_write, this));
             ws_->async_write(net::buffer(tf_json_str), beast::bind_front_handler(&LeftArmNode::on_write, this));
         });
     }
@@ -330,7 +373,12 @@ private:
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
-    rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedPtr client_;
+//    rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedPtr client_;
+    rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedPtr select_gripper_client_;
+    rclcpp::Client<grp_control_msg::srv::Void>::SharedPtr gripper_open_client_;
+    rclcpp::Client<grp_control_msg::srv::Void>::SharedPtr gripper_close_client_;
+
+    rclcpp::TimerBase::SharedPtr sync_publisher_timer_;
 
     net::io_context ioc_;
     std::shared_ptr<websocket::stream<tcp::socket>> ws_;
@@ -344,7 +392,8 @@ private:
     beast::flat_buffer buffer_;
     bool trigger = false;
     bool gripper_state_ = false;
-
+    bool sync_ = false;
+    bool ai_mode_ = false;
 
     std::string tf_json_str = "";
 
