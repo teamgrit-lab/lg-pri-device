@@ -14,9 +14,6 @@
 #include <thread>
 #include <deque>
 
-// #include <gripper_interfaces/srv/gripper_command.hpp>
-#include <grp_control_msg/srv/single_int.hpp>
-#include <grp_control_msg/srv/void.hpp>
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -31,19 +28,13 @@ public:
     RightArmNode(const std::string &host, const std::string &port, const std::string &endpoint, const std::string &mime)
         : Node("right_arm_node"), host_(host), port_(port), endpoint_(endpoint), mime_(mime), tf_buffer_(this->get_clock()), tf_listener_(tf_buffer_)
     {
-        pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose", 10);
         pose_publisher_no_filter = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose_no_filter", 10);
+        pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/right_arm_pose", 10);
         sync_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/right_arm_sync_trigger", 10);
-        ai_mode_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/ai_mode_trigger", 10);
-
-//        client_ = this->create_client<gripper_interfaces::srv::GripperCommand>("/jodell/gripper_command/right");
-        select_gripper_client_ = this->create_client<grp_control_msg::srv::SingleInt>("/modbus_slave_change");
-        gripper_open_client_ = this->create_client<grp_control_msg::srv::Void>("/grp_open");
-        gripper_close_client_ = this->create_client<grp_control_msg::srv::Void>("/grp_close");
-
+        ai_mode_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/right_arm_ai_mode", 10);
+        gripper_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/right_arm_gripper", 10);
         
         tf_send_timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&RightArmNode::lookup_tf_and_send, this));
-
         sync_publisher_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&RightArmNode::sync_publisher_timer_callback, this));
 
         // Start the WebSocket connection
@@ -103,57 +94,6 @@ public:
         }
         catch (std::exception &e) {
             RCLCPP_ERROR(this->get_logger(), "Error reconnecting to WebSocket: %s", e.what());
-        }
-    }
-
-    void call_service(const int request_data) {
-        auto request = std::make_shared<grp_control_msg::srv::SingleInt::Request>();
-        request->value = 2;
-        auto gripper_request = std::make_shared<grp_control_msg::srv::Void::Request>();
-    
-        // Use async callback-based approach instead of spin_until_future_complete
-        auto callback = [this](rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedFuture future) {
-            try {
-                auto response = future.get();
-//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
-                // if (response->successed) {
-                //     if (request_data > 0) {
-                //         gripper_state_ = true;
-                //     }
-                //     else {
-                //         gripper_state_ = false;
-                //     }
-                // }
-//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
-            } catch (const std::exception &e) {
-                RCLCPP_ERROR(this->get_logger(), "Service call failed: %s", e.what());
-            }
-        };
-
-        auto gripper_callback = [this, request_data](rclcpp::Client<grp_control_msg::srv::Void>::SharedFuture future) {
-            try {
-                auto response = future.get();
-//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
-                if (response->successed) {
-                    if (request_data > 0) {
-                        gripper_state_ = true;
-                    }
-                    else {
-                        gripper_state_ = false;
-                    }
-                }
-//                RCLCPP_INFO(this->get_logger(), "Service call success: %s", response->message.c_str());
-            } catch (const std::exception &e) {
-                RCLCPP_ERROR(this->get_logger(), "Service call failed: %s", e.what());
-            }
-        };
-    
-        // Send the request asynchronously
-        auto future_result = select_gripper_client_->async_send_request(request, callback);
-        if (request_data == 1) {
-            auto open_result = gripper_open_client_->async_send_request(gripper_request, gripper_callback);
-        } else {
-            auto close_result = gripper_close_client_->async_send_request(gripper_request, gripper_callback);
         }
     }
 
@@ -222,11 +162,6 @@ public:
                 sum_z += pose_msg->pose.position.z * std::exp((count / 12.0) - 1);
 
                 count++;
-
-//                sum_qx += pose_msg->pose.orientation.x;
-//                sum_qy += pose_msg->pose.orientation.y;
-//                sum_qz += pose_msg->pose.orientation.z;
-//                sum_qw += pose_msg->pose.orientation.w;
             }
 
             averaged_pose.pose.position.x = sum_x / sum_exp;
@@ -235,38 +170,20 @@ public:
 
             averaged_pose.pose.orientation = current_pose->pose.orientation;
 
-//            averaged_pose.pose.orientation.x = sum_qx / pose_buffer_.size();
-//            averaged_pose.pose.orientation.y = sum_qy / pose_buffer_.size();
-//            averaged_pose.pose.orientation.z = sum_qz / pose_buffer_.size();
-//            averaged_pose.pose.orientation.w = sum_qw / pose_buffer_.size();
-
-//            double norm = std::sqrt(averaged_pose.pose.orientation.x * averaged_pose.pose.orientation.x + averaged_pose.pose.orientation.y * averaged_pose.pose.orientation.y + averaged_pose.pose.orientation.z * averaged_pose.pose.orientation.z + averaged_pose.pose.orientation.w * averaged_pose.pose.orientation.w);
-//            if (norm != 0) {
-//                averaged_pose.pose.orientation.x /= norm;
-//                averaged_pose.pose.orientation.y /= norm;
-//                averaged_pose.pose.orientation.z /= norm;
-//                averaged_pose.pose.orientation.w /= norm;
-//            }
 
             pose_publisher_->publish(averaged_pose);
             pose_publisher_no_filter->publish(*current_pose);
 
 
             try {
-                int gripper = j["gripper"].get<int>();
-                call_service(gripper);
-            } catch (std::exception &e) {
-                RCLCPP_ERROR(this->get_logger(), "Error parsing gripper state from JSON: %s", e.what());
-            }
-
-            try
-            {
+                if (j.contains("gripper"))
+                {
+                    int gripper = j["gripper"].get<int>();
+                    gripper_state_ = (gripper == 1);
+                }
                 if (j.contains("sync"))
                 {
                     sync_ = j["sync"].get<bool>();
-//                    auto sync_msg = std_msgs::msg::Bool();
-//                    sync_msg.data = j["sync"].get<bool>();
-//                    sync_publisher_->publish(sync_msg);
                 }
                 if (j.contains("ai_mode"))
                 {
@@ -292,11 +209,12 @@ public:
             auto sync_msg = std_msgs::msg::Bool();
             sync_msg.data = sync_;
             sync_publisher_->publish(sync_msg);
-
             auto ai_mode_msg = std_msgs::msg::Bool();
             ai_mode_msg.data = ai_mode_;
             ai_mode_publisher_->publish(ai_mode_msg);
-
+            auto gripper_msg = std_msgs::msg::Bool();
+            gripper_msg.data = gripper_state_;
+            gripper_publisher_->publish(gripper_msg);
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "Error sync_publisher: %s", e.what());
         }
@@ -372,17 +290,14 @@ public:
     }
 
 private:
+rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_no_filter;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_publisher_no_filter;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr gripper_publisher_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr sync_publisher_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ai_mode_publisher_;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
     rclcpp::TimerBase::SharedPtr tf_send_timer_;
-//    rclcpp::Client<gripper_interfaces::srv::GripperCommand>::SharedPtr client_;
-    rclcpp::Client<grp_control_msg::srv::SingleInt>::SharedPtr select_gripper_client_;
-    rclcpp::Client<grp_control_msg::srv::Void>::SharedPtr gripper_open_client_;
-    rclcpp::Client<grp_control_msg::srv::Void>::SharedPtr gripper_close_client_;
 
     rclcpp::TimerBase::SharedPtr sync_publisher_timer_;
 
